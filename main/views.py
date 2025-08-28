@@ -6,6 +6,9 @@ from rest_framework.generics import get_object_or_404
 from rest_framework.filters import SearchFilter, OrderingFilter
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.pagination import  PageNumberPagination, LimitOffsetPagination
+from drf_yasg.utils import swagger_auto_schema
+from drf_yasg import openapi
+from django.db.models import Q
 
 
 from rest_framework.viewsets import ModelViewSet
@@ -15,22 +18,100 @@ from .filters import SongFilter
 from .serializers import *
 from .models import *
 
-class SingerAPIView(APIView):
-    def get(self, request):
-        singer = Singer.objects.all()
-        serializer =SingerPostSerializer(singer, many=True)
-        return Response(serializer.data)
 
-    def post(self, request):
-        serializer = SingerPostSerializer(data=request.data)
-        if serializer.is_valid():
-            Singer.objects.create(
-                name=serializer.data['name'],
-                birthdate=serializer.data['birthdate'],
-                country=serializer.data['country']
+
+class SingerListView(APIView):
+    @swagger_auto_schema(
+        manual_parameters=[
+            openapi.Parameter(
+                name='search',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="Ism yoki mamlakat bo'yicha qidiruv",
+            ),
+            openapi.Parameter(
+                name='country',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="Mamlakat bo'yicha filtr",
+            ),
+            openapi.Parameter(
+                name='ordering',
+                in_=openapi.IN_QUERY,
+                type=openapi.TYPE_STRING,
+                description="Tartiblash: name, birthdate (asc desc)",
+                enum=['name', 'birthdate', '-name', '-birthdate'],
+            ),
+        ],
+    )
+    def get(self, request):
+        singers = Singer.objects.all()
+
+        country = request.GET.get('country')
+        if country:
+            singers = singers.filter(country__iexact=country)
+
+        search = request.GET.get('search')
+        if search:
+            singers = singers.filter(
+                Q(name__icontains=search) | Q(country__icontains=search)
             )
-            return Response(serializer.data)
-        return Response(serializer.errors)
+
+        ordering = request.GET.get('ordering')
+        valid_ordering_fields = ['name', 'birthdate', '-name', '-birthdate']
+        if ordering:
+            if ordering not in valid_ordering_fields:
+                return Response(
+                    {
+                        'success': False,
+                        'error': "Ordering faqat: 'name', 'birthdate', '-name', '-birthdate' bo'yicha"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            try:
+                singers = singers.order_by(ordering)
+            except Exception as e:
+                return Response(
+                    {
+                        'success': False,
+                        'error': f"Tartiblashda xatolik: {str(e)}"
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+        serializer = SingerSafeSerializer(singers, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @swagger_auto_schema(
+        operation_summary="Yangi qo'shiqchi qo'shish",
+        request_body=SingerPostSerializer,
+    )
+    def post(self, request):
+        serializer = SingerSafeSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+
+
+# class SingerAPIView(APIView):
+#     def get(self, request):
+#         singer = Singer.objects.all()
+#         serializer =SingerPostSerializer(singer, many=True)
+#         return Response(serializer.data)
+#
+#     def post(self, request):
+#         serializer = SingerPostSerializer(data=request.data)
+#         if serializer.is_valid():
+#             Singer.objects.create(
+#                 name=serializer.data['name'],
+#                 birthdate=serializer.data['birthdate'],
+#                 country=serializer.data['country']
+#             )
+#             return Response(serializer.data)
+#         return Response(serializer.errors)
 
 class SingerRetrieveUpdateDeleteAPIVIew(APIView):
     def get_object(self, pk):
